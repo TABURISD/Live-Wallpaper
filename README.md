@@ -56,7 +56,8 @@ python -m app
 
 ```
 app/            Python 核心：主窗口、壁纸引擎、mpv 后端、Web API、Qt 对话框
-  players/      libmpv-2.dll（mpv 官方 Windows 构建）
+  players/      libmpv-2.dll（mpv 官方 Windows 构建；约 116 MB 不入库，
+                由 packaging/fetch_libmpv.py 在构建前自动下载）
   ui/           Qt 界面组件（液态玻璃主题、取帧/裁剪对话框）
 web/            WebView2 承载的前端 UI（原生 HTML/CSS/JS）
 data/           运行数据：config.json、library.json、thumbs/（不入库、安装时不携带）
