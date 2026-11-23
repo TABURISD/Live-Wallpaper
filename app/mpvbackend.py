@@ -11,24 +11,32 @@ from pathlib import Path
 DLL_DIR = Path(__file__).resolve().parent / "players"
 
 _state: bool | None = None
+_error: str = ""
 
 
 def backend_available() -> bool:
     """libmpv 是否可用（只探测一次）。"""
-    global _state
+    global _state, _error
     if _state is not None:
         return _state
     try:
         os.add_dll_directory(str(DLL_DIR))
-    except Exception:
-        pass
+    except Exception as e:
+        _error = f"add_dll_directory: {e!r}"
     os.environ["PATH"] = str(DLL_DIR) + os.pathsep + os.environ.get("PATH", "")
     try:
         import mpv  # noqa: F401
         _state = True
-    except Exception:
+    except Exception as e:
         _state = False
+        import traceback
+        _error = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-400:]}"
     return _state
+
+
+def backend_error() -> str:
+    backend_available()
+    return _error
 
 
 class MpvPlayer:

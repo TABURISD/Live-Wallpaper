@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request, send_file
 from .config import Config, PROJECT_ROOT, DOWNLOAD_DIR
 from .library import Library
 from . import sources
+from . import mpvbackend
 
 
 def apply_autostart(checked: bool) -> bool:
@@ -88,6 +89,8 @@ def create_app(win) -> Flask:
             "current": {"path": cur, "type": ctype,
                         "title": e.name if e else (Path(cur).stem if cur else "")},
             "backend": win.video_window.backend if win.video_window else "",
+            "mpv_dir": str(mpvbackend.DLL_DIR),
+            "mpv_error": mpvbackend.backend_error(),
             "video_attached": bool(win.video_window and win.video_window.attached),
         })
 
