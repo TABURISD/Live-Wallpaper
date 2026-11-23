@@ -161,6 +161,10 @@ class VideoPlayerWindow(QMainWindow):
         self.surface = QWidget()
         self.surface.setObjectName("videoSurface")
         self.surface.setStyleSheet("background:#000;")
+        # mpv 直接渲染进原生 HWND：禁止 Qt 擦除背景，
+        # 否则系统重绘/Explorer 刷新时 Qt 会用底色覆盖交换链 → 周期性闪黑
+        self.surface.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.surface.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         self.setCentralWidget(self.surface)
         self.backend = "mpv" if mpvbackend.backend_available() else "qt"
         self._mpv: mpvbackend.MpvPlayer | None = None

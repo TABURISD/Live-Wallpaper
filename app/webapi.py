@@ -17,7 +17,10 @@ from . import sources
 
 
 def apply_autostart(checked: bool) -> bool:
-    """开机自启：写/删注册表 Run 项。冻结的 exe 直接启动自身；开发模式用 pythonw -m app。"""
+    """开机自启：写/删注册表 Run 项。冻结的 exe 直接启动自身；开发模式用 pythonw -m app。
+
+    开发模式经 wscript 隐藏启动：直接挂 cmd /c 会在登录时闪出黑色控制台窗口。
+    """
     import sys
     import winreg
     try:
@@ -30,10 +33,17 @@ def apply_autostart(checked: bool) -> bool:
                 if getattr(sys, "frozen", False):
                     cmd = f'"{sys.executable}"'
                 else:
-                    from .config import PROJECT_ROOT
+                    from .config import PROJECT_ROOT, DATA_DIR
                     exe = sys.executable.replace("python.exe", "pythonw.exe")
-                    cmd = (f'cmd /c cd /d "{PROJECT_ROOT}" && '
-                           f'"{exe}" -m app')
+                    inner = (f'cmd /c cd /d "{PROJECT_ROOT}" && '
+                             f'"{exe}" -m app')
+                    vbs = DATA_DIR / "autostart.vbs"
+                    vbs.write_text(
+                        'CreateObject("WScript.Shell").Run '
+                        + '"{}"'.format(inner.replace('"', '""'))
+                        + ', 0, False\n',
+                        encoding="ascii")
+                    cmd = f'wscript.exe "{vbs}"'
                 winreg.SetValueEx(key, "MeWallpaper", 0, winreg.REG_SZ, cmd)
             else:
                 try:

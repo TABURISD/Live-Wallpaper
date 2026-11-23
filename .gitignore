@@ -14,6 +14,10 @@ dist/
 packaging/output/
 *.spec.bak
 
+# libmpv-2.dll（约 116 MB，超 GitHub 单文件限制；构建前由 packaging/fetch_libmpv.py 拉取）
+app/players/*.dll
+3rdparty/mpv/
+
 # 开发临时文件
 scripts/*.log
 scripts/snapshots/

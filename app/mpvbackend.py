@@ -37,7 +37,15 @@ class MpvPlayer:
     def __init__(self, wid: int, hwdec: bool = True, volume: int = 0,
                  loop: bool = True):
         import mpv
+        import sys
         self.loop = loop
+        extra = {}
+        if sys.platform == "win32":
+            # 桌面壁纸长时间嵌入播放的防闪屏关键：
+            # gpu-context=win 用 OpenGL(WGL) 渲染，避开与 WebView2/DWM 的
+            # D3D11 交换链争抢同一翻转队列（后者会表现为周期性白屏/黑屏闪烁）。
+            extra["vo"] = "gpu"
+            extra["gpu-context"] = "win"
         self._m = mpv.MPV(
             wid=str(int(wid)),
             loop="inf" if loop else "no",
@@ -45,7 +53,8 @@ class MpvPlayer:
                "keep-open": "yes",
                "really-quiet": "",
                "ytdl": "no",
-               "volume": str(max(0, min(100, volume)))})
+               "volume": str(max(0, min(100, volume))),
+               **extra})
 
     def play(self, path: str) -> None:
         self._m.play(str(path))
