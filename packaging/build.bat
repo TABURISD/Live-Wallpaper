@@ -13,7 +13,9 @@ if errorlevel 1 (
 echo [1/3] PyInstaller 打包...
 python -m PyInstaller packaging\MeWallpaper.spec --noconfirm || exit /b 1
 
-set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+set "ISCC=%ProgramFiles%\Inno Setup 7\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%ProgramFiles(x86)%\Inno Setup 7\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (
     echo 未找到 Inno Setup，请先安装 https://jrsoftware.org/isinfo.php

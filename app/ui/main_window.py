@@ -549,10 +549,14 @@ class MainWindow(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
-        # 启动时恢复上次的壁纸（仅图片类型，视频需手动重新设置）
+        # 启动时恢复上次的壁纸
         cur = self.config.get("current_wallpaper", "")
-        if cur and Path(cur).exists() and self.config.get("current_wallpaper_type") == "image":
-            self.statusBar().showMessage(f"当前壁纸：{Path(cur).name}")
+        if cur and Path(cur).exists():
+            if self.config.get("current_wallpaper_type") == "image":
+                self.statusBar().showMessage(f"当前壁纸：{Path(cur).name}")
+            else:
+                # 视频壁纸：开机/重启软件后自动挂回桌面
+                QTimer.singleShot(1200, lambda: self.set_video_wallpaper(cur))
 
     # ---------- 设置壁纸 ----------
     def set_image_wallpaper(self, path: str):
