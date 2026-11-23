@@ -37,15 +37,11 @@ class MpvPlayer:
     def __init__(self, wid: int, hwdec: bool = True, volume: int = 0,
                  loop: bool = True):
         import mpv
-        import sys
         self.loop = loop
-        extra = {}
-        if sys.platform == "win32":
-            # 桌面壁纸长时间嵌入播放的防闪屏关键：
-            # gpu-context=win 用 OpenGL(WGL) 渲染，避开与 WebView2/DWM 的
-            # D3D11 交换链争抢同一翻转队列（后者会表现为周期性白屏/黑屏闪烁）。
-            extra["vo"] = "gpu"
-            extra["gpu-context"] = "win"
+        # 不指定 vo/gpu-context，让 mpv 在 Windows 上自动选择 d3d11：
+        # 壁纸窗口是 WorkerW 的子窗口，WGL(gpu-context=win) 的呈现到不了
+        # 桌面合成路径（实测窗口透明、画面出不来），d3d11 交换链才能被
+        # DWM 正常合成到桌面层。闪屏问题由 Qt 侧的背景擦除控制解决。
         self._m = mpv.MPV(
             wid=str(int(wid)),
             loop="inf" if loop else "no",
@@ -53,8 +49,7 @@ class MpvPlayer:
                "keep-open": "yes",
                "really-quiet": "",
                "ytdl": "no",
-               "volume": str(max(0, min(100, volume))),
-               **extra})
+               "volume": str(max(0, min(100, volume)))})
 
     def play(self, path: str) -> None:
         self._m.play(str(path))

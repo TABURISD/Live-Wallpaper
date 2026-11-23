@@ -18,6 +18,7 @@ from ..library import Library
 from ..wallpaper import Slideshow, set_wallpaper
 from .. import videowall
 from .. import mpvbackend
+from .. import mpvhost
 from ..sources import autodetect_proxy, set_proxy
 from .anim import fade_in
 from .glass import enable_glass, is_win11
@@ -168,6 +169,7 @@ class VideoPlayerWindow(QMainWindow):
         self.setCentralWidget(self.surface)
         self.backend = "mpv" if mpvbackend.backend_available() else "qt"
         self._mpv: mpvbackend.MpvPlayer | None = None
+        self._mpv_host: int | None = None   # mpv 渲染专用的纯 Win32 子窗口 HWND
         self._qt_player = None
         self._qt_audio = None
         self._mpv_fit_timer: QTimer | None = None
@@ -198,6 +200,34 @@ class VideoPlayerWindow(QMainWindow):
                 self.on_preview_closed()
             except Exception:
                 pass
+
+    # ---------- mpv 原生宿主窗口 ----------
+    def _ensure_mpv_host(self) -> int:
+        """创建/复用 mpv 渲染专用的纯 Win32 子窗口，返回 HWND。
+
+        Qt 的 QWidget 会把自己的后备存储合成在原生内容之上，mpv 直接渲染
+        进 QWidget 的 HWND 会被盖住（实测全黑）；原生 Static 风格子窗口
+        则完全由 mpv 呈现，Qt 只负责外层窗口的几何与生命周期。
+        """
+        if self._mpv_host:
+            return self._mpv_host
+        self._mpv_host = mpvhost.create(int(self.winId()))
+        self._sync_mpv_host()
+        return self._mpv_host
+
+    def _sync_mpv_host(self):
+        if not self._mpv_host:
+            return
+        try:
+            dpr = self.devicePixelRatioF()
+            mpvhost.sync(self._mpv_host, 0, 0,
+                         int(self.width() * dpr), int(self.height() * dpr))
+        except Exception:
+            pass
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_mpv_host()
 
     # ---------- Qt 兜底后端 ----------
     def _ensure_qt_player(self):
@@ -238,7 +268,7 @@ class VideoPlayerWindow(QMainWindow):
         if self.backend == "mpv":
             if self._mpv is None:
                 self._mpv = mpvbackend.MpvPlayer(
-                    int(self.surface.winId()), hwdec=hwdec, volume=volume,
+                    self._ensure_mpv_host(), hwdec=hwdec, volume=volume,
                     loop=loop)
             self._mpv.set_loop(loop)
             self._mpv.set_volume(volume)
@@ -284,7 +314,7 @@ class VideoPlayerWindow(QMainWindow):
         if self.backend == "mpv":
             if self._mpv is None:
                 self._mpv = mpvbackend.MpvPlayer(
-                    int(self.surface.winId()), hwdec=hwdec, volume=volume,
+                    self._ensure_mpv_host(), hwdec=hwdec, volume=volume,
                     loop=loop)
             self._mpv.set_loop(loop)
             self._mpv.set_volume(volume)
@@ -380,6 +410,12 @@ class VideoPlayerWindow(QMainWindow):
         if self._mpv is not None:
             self._mpv.terminate()
             self._mpv = None
+        if self._mpv_host:
+            try:
+                mpvhost.destroy(self._mpv_host)
+            except Exception:
+                pass
+            self._mpv_host = None
         if self._qt_player is not None:
             self._qt_player.stop()
         try:
@@ -588,6 +624,11 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_work, daemon=True).start()
 
     def set_video_wallpaper(self, path: str):
+        # 重入保护：定时器可能并发触发（自动恢复 + 启动参数），
+        # 弹模态框会嵌套事件循环放大重入 → 栈溢出崩溃，必须挡住
+        if getattr(self, "_setting_video", False):
+            return
+        self._setting_video = True
         try:
             if self.video_window is None:
                 self.video_window = VideoPlayerWindow()
@@ -606,15 +647,15 @@ class MainWindow(QMainWindow):
                     self._fs_timer.start()
                 self._keep_timer.start()   # 层级保活，防 Explorer 重绘盖掉
             else:
-                QMessageBox.warning(
-                    self, "动态壁纸失败",
-                    "无法嵌入桌面层（WorkerW）。\n"
-                    "可能系统策略限制，视频已在窗口中播放预览。")
+                self.statusBar().showMessage(
+                    "动态壁纸失败：无法嵌入桌面层（WorkerW），已在窗口中预览")
                 self.video_window.showNormal()
         except Exception as ex:
-            QMessageBox.warning(self, "动态壁纸失败",
-                                f"Qt Multimedia 无法播放该视频：\n{ex}\n"
-                                "请确认系统有可用视频解码器。")
+            import traceback
+            traceback.print_exc()
+            self.statusBar().showMessage(f"动态壁纸失败：{ex}")
+        finally:
+            self._setting_video = False
 
     def stop_video_wallpaper(self, restore: bool = True):
         # 无条件 stop：既能停桌面视频壁纸，也能关掉浮动预览窗。
