@@ -35,8 +35,8 @@
 
 下载 `MeWallpaper-Setup.exe` 运行即可（Inno Setup 打包，无需 Python）。安装后：
 
-- 程序位于 `C:\Program Files\MeWallpaper`（或你选择的目录）
-- 配置、壁纸库、缩略图存在 `%LOCALAPPDATA%\MeWallpaper\data`（Program Files 无写权限，首次运行自动迁移免安装版的数据）
+- 程序位于你选择的安装目录（默认 `%LOCALAPPDATA%\Programs\MeWallpaper`，免管理员；想要 `C:\Program Files` 可用命令行参数 `/DIR=...` 覆盖）
+- 配置、壁纸库、缩略图固定存在 `%LOCALAPPDATA%\MeWallpaper\data`——卸载、升级安装目录都不会动用户数据
 - 开始菜单 / 桌面快捷方式；设置页可开关开机自启；控制面板可卸载
 
 系统要求：Windows 10 1803+（需 WebView2 运行时，Win10 21H2+/Win11 已内置）。

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
@@ -12,37 +13,43 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _pick_data_dir() -> Path:
-    """数据目录：优先项目内 data/；安装到 Program Files 等只读位置时，
-    自动切换到 %LOCALAPPDATA%\\MeWallpaper\\data，保证配置/缓存可写。"""
+    """数据目录选择：
+    - 免安装运行（源码直跑）：项目内 data/（可写时）
+    - 打包/安装版（sys.frozen）：固定 %LOCALAPPDATA%\\MeWallpaper\\data，
+      卸载/升级安装目录时不丢用户数据；首次运行自动迁移安装目录内
+      自带的旧数据（如有）。
+    """
     local = PROJECT_ROOT / "data"
-    try:
-        local.mkdir(parents=True, exist_ok=True)
-        probe = local / ".writetest"
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink()
-        return local
-    except Exception:
-        base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-        d = base / "MeWallpaper" / "data"
-        d.mkdir(parents=True, exist_ok=True)
-        # 免安装版（项目内 data/ 可写）升级到安装版时，迁移已有配置/壁纸库/缩略图
-        if local.exists() and not (d / "config.json").exists():
-            import shutil
-            for name in ("config.json", "library.json"):
-                src = local / name
-                if src.exists():
-                    try:
-                        shutil.copy2(src, d / name)
-                    except Exception:
-                        pass
-            for sub in ("thumbs", "downloads"):
-                src = local / sub
-                if src.exists():
-                    try:
-                        shutil.copytree(src, d / sub, dirs_exist_ok=True)
-                    except Exception:
-                        pass
-        return d
+    if not getattr(sys, "frozen", False):
+        try:
+            local.mkdir(parents=True, exist_ok=True)
+            probe = local / ".writetest"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return local
+        except Exception:
+            pass
+    base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+    d = base / "MeWallpaper" / "data"
+    d.mkdir(parents=True, exist_ok=True)
+    # 迁移安装目录内自带/旧版的数据（首次运行）
+    if local.exists() and not (d / "config.json").exists():
+        import shutil
+        for name in ("config.json", "library.json"):
+            src = local / name
+            if src.exists():
+                try:
+                    shutil.copy2(src, d / name)
+                except Exception:
+                    pass
+        for sub in ("thumbs", "downloads"):
+            src = local / sub
+            if src.exists():
+                try:
+                    shutil.copytree(src, d / sub, dirs_exist_ok=True)
+                except Exception:
+                    pass
+    return d
 
 
 DATA_DIR = _pick_data_dir()
