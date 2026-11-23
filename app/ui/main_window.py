@@ -265,11 +265,15 @@ class VideoPlayerWindow(QMainWindow):
         screen = QGuiApplication.primaryScreen()
         rect = screen.virtualGeometry() if stretch else screen.geometry()
         self.setGeometry(rect)
-        if self.backend == "mpv":
-            if self._mpv is None:
+        if self.backend == "mpv" and self._mpv is None:
+            try:
                 self._mpv = mpvbackend.MpvPlayer(
                     self._ensure_mpv_host(), hwdec=hwdec, volume=volume,
                     loop=loop)
+            except Exception:
+                self._mpv = None
+                self.backend = "qt"      # mpv 子进程拉不起来，降级 Qt 兜底
+        if self.backend == "mpv" and self._mpv is not None:
             self._mpv.set_loop(loop)
             self._mpv.set_volume(volume)
             self._mpv.resume()
@@ -311,11 +315,15 @@ class VideoPlayerWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         self._fit_preview_done = False
-        if self.backend == "mpv":
-            if self._mpv is None:
+        if self.backend == "mpv" and self._mpv is None:
+            try:
                 self._mpv = mpvbackend.MpvPlayer(
                     self._ensure_mpv_host(), hwdec=hwdec, volume=volume,
                     loop=loop)
+            except Exception:
+                self._mpv = None
+                self.backend = "qt"      # mpv 子进程拉不起来，降级 Qt 兜底
+        if self.backend == "mpv" and self._mpv is not None:
             self._mpv.set_loop(loop)
             self._mpv.set_volume(volume)
             self._mpv.play(path)
@@ -389,7 +397,7 @@ class VideoPlayerWindow(QMainWindow):
     def is_playing(self) -> bool:
         try:
             if self.backend == "mpv":
-                return bool(self._mpv and not self._mpv._m.pause)
+                return bool(self._mpv and not self._mpv.paused)
             return bool(self._qt_player
                         and self._qt_player.playbackState() == 2)  # PlayingState
         except Exception:
@@ -398,7 +406,7 @@ class VideoPlayerWindow(QMainWindow):
     def position_ms(self) -> int:
         try:
             if self.backend == "mpv":
-                return int((self._mpv._m.time_pos or 0) * 1000)
+                return int(self._mpv.position() * 1000)
             return int(self._qt_player.position())
         except Exception:
             return 0
@@ -872,7 +880,7 @@ class MainWindow(QMainWindow):
         act_stop_video.triggered.connect(self.stop_video_wallpaper)
         act_quit.triggered.connect(self._quit)
         self.tray.activated.connect(
-            lambda reason: self.showNormal()
+            lambda reason: self._show_ui()
             if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
 
     def _quit(self):

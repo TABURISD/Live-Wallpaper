@@ -89,7 +89,7 @@ def create_app(win) -> Flask:
             "current": {"path": cur, "type": ctype,
                         "title": e.name if e else (Path(cur).stem if cur else "")},
             "backend": win.video_window.backend if win.video_window else "",
-            "mpv_dir": str(mpvbackend.DLL_DIR),
+            "mpv_dir": str(mpvbackend.MPV_EXE),
             "mpv_error": mpvbackend.backend_error(),
             "video_attached": bool(win.video_window and win.video_window.attached),
         })

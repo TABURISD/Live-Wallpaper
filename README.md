@@ -26,7 +26,7 @@
 - 六种填充方式：填充 / 适应 / 拉伸 / 居中 / 平铺 / 跨屏，**修改后立即对当前壁纸生效**
 - 定时轮播：自定义间隔与来源（全部库 / 仅收藏 / 指定文件夹）
 - 快捷键 `Ctrl + Alt + N` 随机换一张
-- 动态壁纸：mpv (libmpv) 内核嵌入桌面 WorkerW 层，支持音量（热更新）、循环开关、画面拉伸/保持比例、硬件解码开关、其他程序全屏时自动暂停
+- 动态壁纸：mpv 独立进程渲染嵌入桌面 WorkerW 层，支持音量（热更新）、循环开关、画面拉伸/保持比例、硬件解码开关、其他程序全屏时自动暂停
 - 系统托盘：双击打开主界面、快捷切换、停止动态壁纸、退出（退出不驻留）
 - 开机自启（注册表 Run 项，安装版/免安装版均可用）
 - 单实例运行：重复启动只会唤起已有窗口
@@ -56,8 +56,8 @@ python -m app
 
 ```
 app/            Python 核心：主窗口、壁纸引擎、mpv 后端、Web API、Qt 对话框
-  players/      libmpv-2.dll（mpv 官方 Windows 构建；约 116 MB 不入库，
-                由 packaging/fetch_libmpv.py 在构建前自动下载）
+  players/      mpv.exe（mpv 官方 Windows 完整构建；约 100 MB 不入库，
+                由 packaging/fetch_mpv.py 在构建前自动下载）
   ui/           Qt 界面组件（液态玻璃主题、取帧/裁剪对话框）
 web/            WebView2 承载的前端 UI（原生 HTML/CSS/JS）
 data/           运行数据：config.json、library.json、thumbs/（不入库、安装时不携带）
@@ -76,9 +76,9 @@ packaging/      PyInstaller + Inno Setup 打包脚本
 └─ Qt GUI 线程（PySide6：托盘、快捷键、轮播、mpv 视频壁纸嵌入 WorkerW）
 ```
 
-- 视频壁纸：mpv (libmpv-2.dll) 渲染进原生 HWND，SetParent 挂到桌面 WorkerW 层；每 1.5s 层级保活防 Explorer 重绘盖掉
+- 视频壁纸：mpv.exe 独立子进程经 `--wid` 渲染进纯 Win32 STATIC 宿主窗口，SetParent 挂到桌面 WorkerW 层；播放控制走命名管道 JSON IPC；mpv 自身崩溃由看门狗自动重拉；每 1.5s 层级保活防 Explorer 重绘盖掉
 - 静态壁纸：SystemParametersInfoW + 注册表 WallpaperStyle
-- 取帧/预览：mpv OpenGL 渲染（MpvRenderContext），预览窗口带系统标题栏，关闭自动恢复桌面壁纸
+- 取帧/预览：同一个 mpv 子进程机制，取帧用 IPC `screenshot-to-file`（原视频分辨率），预览窗口带系统标题栏，关闭自动恢复桌面壁纸
 
 ## 构建安装包
 

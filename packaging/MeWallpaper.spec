@@ -13,12 +13,11 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=[],
     datas=[
-        (str(ROOT / "app" / "players" / "libmpv-2.dll"), "app/players"),
+        (str(ROOT / "app" / "players" / "mpv.exe"), "app/players"),
         (str(ROOT / "app" / "icon.ico"), "app"),
         (str(ROOT / "web"), "web"),
     ],
     hiddenimports=[
-        "mpv",
         "PySide6.QtMultimedia",
         "PySide6.QtMultimediaWidgets",
         "PySide6.QtNetwork",

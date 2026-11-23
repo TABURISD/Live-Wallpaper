@@ -7,8 +7,7 @@
 | 组件 | 版本 | 许可证 | 使用方式 |
 |---|---|---|---|
 | Qt for Python (PySide6 / PySide6-Essentials / PySide6-Addons) | 6.12.0 | LGPL-3.0-only **或** GPL-2.0-only **或** GPL-3.0-only（由使用者择一） | 本项目以 **LGPL-3.0** 条款动态链接使用，未修改 Qt 源码。LGPL-3.0 要求：允许最终用户用自己的 Qt 版本替换之（本软件通过标准动态链接加载未修改的官方 PySide6  wheel，满足该要求）。完整文本：<https://www.gnu.org/licenses/lgpl-3.0.txt>，源码：<https://download.qt.io/official_releases/QtForPython/> |
-| mpv (libmpv-2.dll，官方 Windows 构建) | 见 `app/players/` | GPL-2.0-or-later **或** LGPL-2.1-or-later（构建选项决定；官方构建的 libmpv 可按 LGPL-2.1+ 使用） | 运行时通过 `os.add_dll_directory` 动态加载，不属于衍生作品。mpv 源码：<https://github.com/mpv-player/mpv> |
-| python-mpv | 1.0.8 | GPL-2.0-or-later **或** LGPL-2.1-or-later（双许可，按 LGPL-2.1+ 使用） | MIT 兼容。源码：<https://github.com/jaseg/python-mpv> |
+| mpv (mpv.exe，官方 Windows 完整构建) | 见 `app/players/` | GPL-2.0-or-later **或** LGPL-2.1-or-later（官方构建可按 LGPL-2.1+ 使用） | 以独立子进程方式调用（`--wid` 嵌入 + 命名管道 IPC），仅进程间协作，不属于衍生作品。mpv 源码：<https://github.com/mpv-player/mpv> |
 | Microsoft Edge WebView2 Runtime | 系统组件 | Microsoft 软件许可条款 | 不在安装包内分发；使用系统已安装的 WebView2 运行时，其许可见 <https://www.microsoft.com/en-us/legal/terms-of-use> |
 
 ## Python 依赖（全部许可证与 MIT 兼容，保留版权声明即可）

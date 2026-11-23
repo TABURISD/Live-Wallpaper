@@ -10,8 +10,8 @@ if errorlevel 1 (
     python -m pip install pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
 )
 
-echo [0/3] 准备 libmpv...
-python packaging\fetch_libmpv.py || exit /b 1
+echo [0/3] 准备 mpv...
+python packaging\fetch_mpv.py || exit /b 1
 
 echo [1/3] PyInstaller 打包...
 python -m PyInstaller packaging\MeWallpaper.spec --noconfirm || exit /b 1
