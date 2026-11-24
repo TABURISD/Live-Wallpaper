@@ -543,6 +543,13 @@ class MainWindow(QMainWindow):
 
     def _watch_webview_window(self):
         """检测 WebView2 窗口从最小化还原，延迟后轻推尺寸以修复白屏。"""
+        # 首 tick 消费开机恢复（一次性；周期性定时器比 singleShot 可靠）
+        if not getattr(self, "_restore_done", False):
+            self._restore_done = True
+            cur = getattr(self, "_pending_restore", "")
+            self._pending_restore = ""
+            if cur and Path(cur).exists():
+                self.set_video_wallpaper(cur)
         if not getattr(self, "_web_mode", False):
             return
         try:
@@ -579,6 +586,8 @@ class MainWindow(QMainWindow):
 
     def bridge_invoke(self, fn):
         """供 Web API 线程调用：把函数调度到 GUI 线程执行。"""
+        from .. import flicklog
+        flicklog.log(f"bridge put {getattr(fn, '__name__', fn)}")
         self._bridge_queue.put(fn)
 
     def _drain_bridge(self):
@@ -587,10 +596,13 @@ class MainWindow(QMainWindow):
                 fn = self._bridge_queue.get_nowait()
             except Exception:
                 break
+            from .. import flicklog
+            flicklog.log(f"bridge run {getattr(fn, '__name__', fn)}")
             try:
                 fn()
             except Exception:
-                pass
+                import traceback
+                flicklog.log("bridge EX\n" + traceback.format_exc())
 
         # 窗口图标
         icon_path = PROJECT_ROOT / "app" / "icon.ico"
@@ -598,16 +610,33 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
 
         # 启动时恢复上次的壁纸
+        from .. import flicklog as _fl0
+        import os as _os0, traceback as _tb0
+        if not hasattr(MainWindow, "_init_logged"):
+            MainWindow._init_logged = True
+            _fl0.log(f"MainWindow init id={id(self)} pid={_os0.getpid()}\n"
+                     + "".join(_tb0.format_stack()[-6:-1]))
         cur = self.config.get("current_wallpaper", "")
         if cur and Path(cur).exists():
             if self.config.get("current_wallpaper_type") == "image":
                 self.statusBar().showMessage(f"当前壁纸：{Path(cur).name}")
             else:
-                # 视频壁纸：开机/重启软件后自动挂回桌面
-                QTimer.singleShot(1200, lambda: self.set_video_wallpaper(cur))
+                # 视频壁纸恢复：只登记 pending，由 _wv_timer 首 tick 消费。
+                # 不用 QTimer.singleShot：本环境实测一次性定时器会被
+                # 嵌套事件循环反复触发（鬼影重挂闪屏）。
+                self._pending_restore = cur
 
     # ---------- 设置壁纸 ----------
+    def _restore_pending_wallpaper(self):
+        """开机自动恢复视频壁纸（一次性消费）。"""
+        cur = getattr(self, "_pending_restore", "")
+        self._pending_restore = ""
+        if cur and Path(cur).exists():
+            self.set_video_wallpaper(cur)
+
     def set_image_wallpaper(self, path: str):
+        from .. import flicklog
+        flicklog.log("set_image enter")
         self.stop_video_wallpaper(restore=False)
         # SystemParametersInfo 在 Explorer 忙 / 视频解码负载高时会阻塞数秒，
         # 放工作线程执行，GUI 线程只回写结果，避免界面和 Web 桥接整体假死。
@@ -616,6 +645,7 @@ class MainWindow(QMainWindow):
 
         def _work():
             ok = set_wallpaper(path, style)
+            flicklog.log(f"set_image SPI ok={ok}")
 
             def _after():
                 if ok:
@@ -623,7 +653,9 @@ class MainWindow(QMainWindow):
                     self.config.set("current_wallpaper_type", "image")
                     self.statusBar().showMessage(f"已设置壁纸：{Path(path).name}")
                 else:
-                    QMessageBox.warning(self, "失败", f"无法设置壁纸：\n{path}")
+                    # 不能弹模态框：Web 模式主窗口隐藏，模态框会无声卡死 GUI 线程
+                    flicklog.log(f"set_image FAILED {path}")
+                    self.statusBar().showMessage(f"无法设置壁纸：{Path(path).name}")
 
             # 注意：工作线程没有 Qt 事件循环，QTimer.singleShot 在这里不会触发，
             # 必须走 bridge 队列由 GUI 线程消费。
@@ -631,13 +663,24 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=_work, daemon=True).start()
 
-    def set_video_wallpaper(self, path: str):
+    def set_video_wallpaper(self, path: str, force: bool = False):
+        # 幂等：同一路径已挂上桌面且在播，直接忽略（除非显式强制重设）。
+        # 自动恢复定时器在嵌套事件循环里可能重复触发，不能因此反复重挂；
+        # 但视频选项（循环/拉伸/解码）变更需要强制重建播放器才能生效。
+        vw = self.video_window
+        if (not force and vw is not None and vw.attached
+                and str(Path(path).resolve())
+                    == self.config.get("current_wallpaper", "")):
+            return
         # 重入保护：定时器可能并发触发（自动恢复 + 启动参数），
         # 弹模态框会嵌套事件循环放大重入 → 栈溢出崩溃，必须挡住
         if getattr(self, "_setting_video", False):
             return
         self._setting_video = True
         try:
+            from .. import flicklog as _fl
+            import traceback as _tb
+            _fl.log("set_video enter\n" + "".join(_tb.format_stack()[-8:-1]))
             if self.video_window is None:
                 self.video_window = VideoPlayerWindow()
             ok = self.video_window.play(
@@ -647,6 +690,22 @@ class MainWindow(QMainWindow):
                 hwdec=bool(self.config.get("video_hw_decode", True)),
                 loop=bool(self.config.get("video_loop", True)),
             )
+            if not ok:
+                # 失败常见原因是 WorkerW 尚未就绪；异步重试两轮，
+                # 单实例冲突时由重入保护挡掉
+                def _retry(n: int):
+                    import time as _t
+                    for _ in range(n):
+                        _t.sleep(1.5)
+                        if getattr(self, "_setting_video", True):
+                            break
+                        if self.video_window and not self.video_window.attached:
+                            self.set_video_wallpaper(path)
+                            break
+                threading.Thread(target=_retry, args=(2,),
+                                 daemon=True).start()
+            from .. import flicklog
+            flicklog.log(f"set_video ok={ok}")
             if ok:
                 self.config.set("current_wallpaper", str(Path(path).resolve()))
                 self.config.set("current_wallpaper_type", "video")
@@ -668,6 +727,8 @@ class MainWindow(QMainWindow):
     def stop_video_wallpaper(self, restore: bool = True):
         # 无条件 stop：既能停桌面视频壁纸，也能关掉浮动预览窗。
         # stop() 内部对未播放状态是安全的（hide + detach + terminate）。
+        from .. import flicklog
+        flicklog.log(f"stop_video restore={restore}")
         if self.video_window:
             self.video_window.stop()
         self._fs_timer.stop()
@@ -675,21 +736,45 @@ class MainWindow(QMainWindow):
         self._video_paused_by_fs = False
 
     def _video_keep_alive(self):
-        """定时把播放窗口重新按到 WorkerW 底层，防止系统重绘后消失。"""
+        """壁纸层级维护。
+
+        关键约束：绝不能在定时器里无脑 SetWindowPos/Z-order 操作——
+        flip 模型的 d3d11 交换链被踢出/拉回独立翻转平面时就是一次闪屏；
+        给 Progman 反复发 0x052C 同样会引起桌面闪烁。
+        只在「真的掉了」或「真的被盖到不是最底层」时才动手。
+        """
         vw = self.video_window
         if not vw or not vw.attached:
             self._keep_timer.stop()
             return
-        if videowall.VideoWallpaperWindow.is_still_attached(vw):
-            # 在 WorkerW 子窗口里压到最底（图标层之下、父背景之上）
-            user32.SetWindowPos(int(vw.winId()), 1, 0, 0, 0, 0,
-                                0x0013)  # HWND_BOTTOM | NOSIZE|NOMOVE|NOACTIVATE
-        else:
+        from .. import flicklog
+        self._ka_ticks = getattr(self, "_ka_ticks", 0) + 1
+        if self._ka_ticks % 20 == 1:
+            flicklog.log("ka alive")
+        if videowall.VideoWallpaperWindow.quick_check(vw):
+            # 还在 WorkerW 下且可见：仅当不再是 WorkerW 最底层子窗口
+            # （Explorer 重绘把图标层顶上来了）才补一次压底。
+            # 压底是幂等的：成功一次后 is_bottom_child 即恢复为真，
+            # 不会每个周期都操作 Z-order（那对 flip 交换链就是闪屏）。
+            if videowall.VideoWallpaperWindow.is_bottom_child(vw):
+                return
             try:
-                videowall.VideoWallpaperWindow.attach(
-                    vw, stretch=bool(self.config.get("video_stretch", True)))
+                flicklog.log("ka press bottom")
+                user32.SetWindowPos(int(vw.winId()), 1, 0, 0, 0, 0,
+                                    0x0013)  # HWND_BOTTOM | NOMOVE|NOSIZE|NOACTIVATE
             except Exception:
                 pass
+            return
+        flicklog.log("ka reattach "
+                     f"parent={user32.GetParent(int(vw.winId()))} "
+                     f"lastw={videowall._last_workerw} "
+                     f"vis={user32.IsWindowVisible(int(vw.winId()))}")
+        try:
+            flicklog.log("ka reattach do")
+            videowall.VideoWallpaperWindow.attach(
+                vw, stretch=bool(self.config.get("video_stretch", True)))
+        except Exception:
+            pass
 
     # ---------- 区域截图设置壁纸 ----------
     @staticmethod
@@ -804,9 +889,13 @@ class MainWindow(QMainWindow):
         is_full = (rc.right - rc.left >= sw and rc.bottom - rc.top >= sh
                    and hwnd != int(self.winId()))
         if is_full and not self._video_paused_by_fs:
+            from .. import flicklog
+            flicklog.log("fs pause")
             self.video_window.pause()
             self._video_paused_by_fs = True
         elif not is_full and self._video_paused_by_fs:
+            from .. import flicklog
+            flicklog.log("fs resume")
             self.video_window.resume()
             self._video_paused_by_fs = False
 
@@ -838,7 +927,8 @@ class MainWindow(QMainWindow):
         if (keys & {"video_stretch", "video_hw_decode", "video_loop"}
                 and ctype == "video" and self.video_window
                 and self.video_window.attached):
-            self.set_video_wallpaper(cur)
+            # force=True：同路径幂等守卫会挡住普通重设，这里必须强制重建
+            self.set_video_wallpaper(cur, force=True)
         if "video_volume" in keys and ctype == "video" and self.video_window:
             vw = self.video_window
             try:

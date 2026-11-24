@@ -120,13 +120,35 @@ def find_workerw() -> int:
     return candidates[-1]
 
 
+def find_workerw_stable() -> int:
+    """返回上次用过的 WorkerW（若仍有效），否则重新找。
+
+    find_workerw() 每次重选可能因可见性/面积变化而换目标（本机顶层有
+    十余个同名 WorkerW），把壁纸窗口移来移去后 quick_check 永远失败，
+    保活陷入每 1.5s 一次的重挂死循环。嵌入目标必须稳定，只在句柄失效
+    （Explorer 重启）时才重新发现。
+    """
+    global _last_workerw
+    if _last_workerw and user32.IsWindow(_last_workerw):
+        return _last_workerw
+    return find_workerw()
+
+
+_last_workerw: int = 0
+
+
 class VideoWallpaperWindow:  # QObject 由调用方组装，这里只做 Win32 嵌入
     @staticmethod
     def attach(qwindow, stretch: bool = True) -> bool:
+        global _last_workerw
+        from . import flicklog
+        flicklog.log(f"attach enter hwnd={int(qwindow.winId())}")
         hwnd = int(qwindow.winId())
-        workerw = find_workerw()
+        workerw = find_workerw_stable()
+        flicklog.log(f"attach workerw={workerw}")
         if not workerw:
             return False
+        _last_workerw = int(workerw)
         # 样式：无边框、子窗口、不抢焦点、不出现在任务栏/Alt-Tab
         style = user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
         style = (style & ~WS_POPUP) | WS_CHILD | WS_VISIBLE
@@ -139,6 +161,11 @@ class VideoWallpaperWindow:  # QObject 由调用方组装，这里只做 Win32 �
         # 避免 Win32 坐标（含 DPI 差异）和 Qt 内部状态互相覆盖。
         user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
                             0x0057)  # NOMOVE|NOSIZE|NOZORDER|NOACTIVATE|SHOWWINDOW
+        # 一次性压到 WorkerW 子窗口栈最底（图标层之下）。
+        # 注意：对 flip 交换链的任何 Z-order 操作都是一次闪屏，
+        # 所以只在嵌入这一刻做一次，之后靠保活的「非必要不动手」维持。
+        user32.SetWindowPos(hwnd, 1, 0, 0, 0, 0,
+                            0x0013)  # HWND_BOTTOM | NOMOVE|NOSIZE|NOACTIVATE
         user32.ShowWindow(hwnd, 5)                        # SW_SHOW 兜底（SetParent 会清可见性）
         return True
 
@@ -155,3 +182,34 @@ class VideoWallpaperWindow:  # QObject 由调用方组装，这里只做 Win32 �
         workerw = find_workerw()
         return bool(workerw) and user32.GetParent(hwnd) == workerw \
             and user32.IsWindowVisible(hwnd)
+
+    @staticmethod
+    def quick_check(qwindow) -> bool:
+        """不打探系统消息的轻量自检：父窗口还是 WorkerW 且可见。
+
+        供定时保活用——绝不能每 1.5s 调 find_workerw()（它给 Progman 发
+        0x052C，且随后的 SetWindowPos 会把 flip 交换链踢出独立翻转平面，
+        两者都会造成周期性闪屏）。
+        """
+        hwnd = int(qwindow.winId())
+        return bool(_last_workerw) \
+            and user32.GetParent(hwnd) == _last_workerw \
+            and user32.IsWindowVisible(hwnd)
+
+    @staticmethod
+    def is_bottom_child(qwindow) -> bool:
+        """壁纸窗口是否已是 WorkerW 的最底层子窗口（图标层之下）。
+
+        注意：GetWindow(GW_HWNDLAST) 取的是「兄弟窗口」链的末尾，
+        直接对父窗口调用返回的不是最底层子窗口（本机实测返回父窗口自身，
+        导致 is_bottom_child 恒假、保活每 1.5s 压底一次 → 周期性闪屏）。
+        正确做法：先 GW_CHILD 取第一个子窗口，再对它的兄弟链取 GW_HWNDLAST。
+        """
+        hwnd = int(qwindow.winId())
+        if not _last_workerw:
+            return True
+        first = user32.GetWindow(_last_workerw, 5)   # GW_CHILD
+        if not first:
+            return True
+        bottom = user32.GetWindow(first, 1)          # GW_HWNDLAST（兄弟链）
+        return int(bottom) == hwnd

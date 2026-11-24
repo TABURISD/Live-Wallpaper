@@ -22,6 +22,8 @@ import threading
 import time
 from pathlib import Path
 
+from . import flicklog
+
 EXE_DIR = Path(__file__).resolve().parent / "players"
 MPV_EXE = EXE_DIR / "mpv.exe"
 
@@ -286,11 +288,27 @@ class MpvPlayer:
             f"--loop-file={'inf' if self.loop else 'no'}",
             f"--hwdec={'auto-safe' if self._hwdec else 'no'}",
             f"--volume={self._volume}",
+            # 嵌入桌面层的交换链调优（实测结论）：
+            # - flip 模型必须保持（bgra8/bitblt 模型在 WorkerW 层根本不显示；
+            #   WGL/DX9 路径同样出不来），但任何 Z-order 扰动都会把 flip
+            #   交换链踢出独立翻转平面 → 定时器里严禁无脑 SetWindowPos
+            # - bgra8：本机显示器被识别为 HDR，auto 会选 10 位交换链，
+            #   壁纸场景固定 8 位即可
+            # - target-colorspace-hint=no：不向 DWM 申报 HDR 色彩空间，
+            #   避免合成器做 HDR 色调映射
+            "--d3d11-flip=yes",
+            "--d3d11-output-format=bgra8",
+            "--target-colorspace-hint=no",
         ] + self._extra
+        # 调试/试验：允许用环境变量追加 mpv 参数（如切换渲染路径）
+        extra_env = os.environ.get("MEWALLPAPER_MPV_ARGS", "").strip()
+        if extra_env:
+            args += extra_env.split()
         self._proc = subprocess.Popen(
             args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        flicklog.log(f"mpv spawn pid={self._proc.pid} wid={self._wid}")
         self._ipc = _Ipc(pipe)
         self._ipc.connect(timeout=10.0)
         gen = self._gen
@@ -304,12 +322,14 @@ class MpvPlayer:
         if proc is None:
             return
         code = proc.wait()
+        flicklog.log(f"mpv exited code={code} closing={self._closing}")
         if self._closing or gen != self._gen or self._last_path is None:
             return
         time.sleep(0.8)
         if self._closing or gen != self._gen:
             return
         try:
+            flicklog.log("watchdog respawn mpv")
             self._respawn_locked()
             if self._last_path:
                 self._cmd("loadfile", self._last_path, "replace")

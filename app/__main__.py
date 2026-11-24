@@ -91,7 +91,10 @@ def main() -> int:
         if "--set-video" in sys.argv:
             try:
                 vpath = sys.argv[sys.argv.index("--set-video") + 1]
-                QTimer.singleShot(800, lambda: win.set_video_wallpaper(vpath))
+                # 与 MainWindow 自动恢复同理：禁用 singleShot 定时器，
+                # 只登记 pending，由 _wv_timer 首 tick 一次性消费，
+                # 防止嵌套事件循环里鬼影重挂
+                win._pending_restore = vpath
             except Exception:
                 pass
         ready.set()
