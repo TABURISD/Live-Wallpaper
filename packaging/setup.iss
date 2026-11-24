@@ -1,6 +1,6 @@
 ; MeWallpaper 安装脚本（Inno Setup 6）
 #define MyAppName "MeWallpaper"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "TABURISD"
 #define MyAppURL "https://github.com/TABURISD/Live-Wallpaper"
 #define MyAppExe "MeWallpaper.exe"
@@ -13,7 +13,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName=D:\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output
