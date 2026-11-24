@@ -380,9 +380,19 @@ def _q(s: str) -> str:
 
 def start_server(win) -> tuple[Flask, int]:
     app = create_app(win)
-    t = threading.Thread(target=lambda: app.run(
-        host="127.0.0.1", port=PORT, threaded=True,
-        use_reloader=False, debug=False),
-        daemon=True)
+
+    def _run():
+        try:
+            app.run(host="127.0.0.1", port=PORT, threaded=True,
+                    use_reloader=False, debug=False)
+        except OSError as ex:
+            # 端口被占 = 已有实例在跑（本进程是互斥体方案的漏网之鱼）。
+            # 双实例抢同一个 WorkerW 必然互踩闪屏乃至崩溃，绝不能带病继续。
+            from . import flicklog
+            flicklog.log(f"port {PORT} in use, second instance exits: {ex}")
+            import os as _os
+            _os._exit(1)
+
+    t = threading.Thread(target=_run, daemon=True)
     t.start()
     return app, PORT

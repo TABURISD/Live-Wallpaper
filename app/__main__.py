@@ -31,7 +31,41 @@ def _notify_existing() -> bool:
     return False
 
 
+_MUTEX_HANDLES: list = []   # 持有互斥体句柄引用，防止被回收
+
+
+def _forward_to_running() -> None:
+    """已有实例在跑：把 --set-video 转发给它（尽力而为），随后本实例退出。"""
+    if "--set-video" not in sys.argv:
+        return
+    try:
+        import json, urllib.request
+        from .webapi import PORT
+        vpath = sys.argv[sys.argv.index("--set-video") + 1]
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{PORT}/api/set",
+            data=json.dumps({"path": vpath}).encode(),
+            headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass
+
+
 def main() -> int:
+    # ---- 单实例第一道防线：内核互斥体 ----
+    # 不依赖对方 Qt 事件循环的响应速度。QLocalSocket 方案在对方 GUI 线程
+    # 忙（模态框 exec / SPI 阻塞）时会连接超时放行，实测出现过三实例并行，
+    # 多实例抢同一个 WorkerW 必然互踩闪屏乃至崩溃。互斥体由内核持有，
+    # 只要对方进程活着就 100% 拦下。
+    import ctypes
+    _kernel32 = ctypes.windll.kernel32
+    _mutex = _kernel32.CreateMutexW(None, False,
+                                    "Local\\MeWallpaper_SingleInstance_0x2")
+    if _kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        _forward_to_running()
+        return 0
+    _MUTEX_HANDLES.append(_mutex)
+
     from PySide6.QtCore import Qt
     try:
         QApplication_set_policy = Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
