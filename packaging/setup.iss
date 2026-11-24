@@ -1,6 +1,6 @@
 ; MeWallpaper 安装脚本（Inno Setup 6）
 #define MyAppName "MeWallpaper"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "TABURISD"
 #define MyAppURL "https://github.com/TABURISD/Live-Wallpaper"
 #define MyAppExe "MeWallpaper.exe"

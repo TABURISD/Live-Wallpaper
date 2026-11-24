@@ -14,6 +14,7 @@ mpv.exe 放在 app/players/，不入库，构建前由 packaging/fetch_mpv.py �
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import itertools
 import json
 import os
@@ -395,6 +396,9 @@ class MpvPlayer:
         """按静态壁纸同款「填充方式」语义调整视频画面：
         fill/stretch/span = 裁边铺满；fit/tile = 适应留边；
         center = 原始尺寸居中。"""
+        if style == getattr(self, "_last_style", None):
+            return                      # 模式没变：不动，避免多余交换链重建
+        self._last_style = style
         ipc = self._ipc
         if ipc is None:
             return
@@ -407,6 +411,35 @@ class MpvPlayer:
         else:                       # fit / tile 等一律按「适应」
             ipc.set("panscan", 0.0)
             ipc.set("video-unscaled", False)
+        # 填充切换后 mpv 只重绘视频矩形，交换链留白区会残留上一模式的
+        # 画面（实测：铺满→适应后黑边里还是旧拉伸帧）。轻推宿主窗口
+        # ±1px 强制 mpv 重建交换链，整窗按背景色（黑）重绘。
+        self._refresh_host()
+
+    def _refresh_host(self) -> None:
+        """±1px 轻推 mpv 宿主窗口，强制交换链重建、整窗重绘。"""
+        try:
+            u = ctypes.windll.user32
+            u.GetParent.argtypes = [wintypes.HWND]
+            u.GetParent.restype = wintypes.HWND
+            u.GetClientRect.argtypes = [wintypes.HWND,
+                                        ctypes.POINTER(wintypes.RECT)]
+            u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND,
+                                       ctypes.c_int, ctypes.c_int,
+                                       ctypes.c_int, ctypes.c_int,
+                                       wintypes.UINT]
+            parent = u.GetParent(self._wid)
+            if not parent:
+                return
+            rc = wintypes.RECT()
+            if not u.GetClientRect(parent, ctypes.byref(rc)):
+                return
+            w, h = rc.right - rc.left, rc.bottom - rc.top
+            u.SetWindowPos(self._wid, 0, 0, 0, w + 1, h + 1, 0x0014)
+            time.sleep(0.25)
+            u.SetWindowPos(self._wid, 0, 0, 0, w, h, 0x0014)
+        except Exception:
+            pass
 
     def pause(self) -> None:
         self._ipc and self._ipc.set("pause", True)
