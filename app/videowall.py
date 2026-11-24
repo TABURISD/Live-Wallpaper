@@ -89,33 +89,47 @@ def _rect_area(hwnd: int) -> int:
     return max(0, rc.right - rc.left) * max(0, rc.bottom - rc.top)
 
 
+def _enumerate_workerw() -> tuple[list[int], set[int]]:
+    """枚举 WorkerW 候选：返回 (candidates, progman_children)。"""
+    progman = user32.FindWindowW(PROGMAN, None)
+    candidates: list[int] = []
+    progman_children: set[int] = set()
+    if progman:
+        # 1) Progman 子窗口里的 WorkerW（Win11 正主在这里）
+        for child in _children_of(progman):
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(child, buf, 256)
+            if buf.value == WORKERW:
+                candidates.append(child)
+                progman_children.add(child)
+    # 2) 顶层 WorkerW（旧系统路径；也可能是其他软件造的同名层）
+    for h in _enum_windows_by_class(WORKERW):
+        if h not in progman_children:
+            candidates.append(h)
+    return candidates, progman_children
+
+
 def find_workerw() -> int:
     """找到桌面壁纸层的 WorkerW 句柄。
 
     Win11 上真正的 WorkerW 是 Progman 的“可见、全屏”子窗口；
     顶层也能枚举到一堆同名小窗口（其他软件创建的），不能选。
-    """
-    progman = user32.FindWindowW(PROGMAN, None)
-    if not progman:
-        return 0
-    # 确保 0x052C 已发送（幂等）
-    res = wintypes.DWORD(0)
-    user32.SendMessageTimeoutW(
-        progman, MSG_SPAWN_WORKERW, 0, 0, 0x0002, 1000, ctypes.byref(res))
 
-    candidates: list[int] = []
-    progman_children: set[int] = set()
-    # 1) Progman 子窗口里的 WorkerW（Win11 正主在这里）
-    for child in _children_of(progman):
-        buf = ctypes.create_unicode_buffer(256)
-        user32.GetClassNameW(child, buf, 256)
-        if buf.value == WORKERW:
-            candidates.append(child)
-            progman_children.add(child)
-    # 2) 顶层 WorkerW（旧系统路径；也可能是其他软件造的同名层）
-    for h in _enum_windows_by_class(WORKERW):
-        if h not in progman_children:
-            candidates.append(h)
+    0x052C 只在「一个 WorkerW 都枚举不到」时才发：实测本机每次收到
+    0x052C Explorer 都会异步销毁重建壁纸层（句柄更换，我们的子窗被
+    连带销毁）。早期实现每次调用都发，重建 → 重挂 → 再发 → 再重建，
+    形成每秒级闪屏/黑屏死亡螺旋。
+    """
+    candidates, progman_children = _enumerate_workerw()
+    if not candidates:
+        progman = user32.FindWindowW(PROGMAN, None)
+        if not progman:
+            return 0
+        res = wintypes.DWORD(0)
+        user32.SendMessageTimeoutW(
+            progman, MSG_SPAWN_WORKERW, 0, 0, 0x0002, 1000,
+            ctypes.byref(res))
+        candidates, progman_children = _enumerate_workerw()
 
     if not candidates:
         return 0

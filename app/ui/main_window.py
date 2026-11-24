@@ -259,6 +259,17 @@ class VideoPlayerWindow(QMainWindow):
         flags = self.windowFlags() | Qt.WindowType.FramelessWindowHint \
             | Qt.WindowType.WindowStaysOnBottomHint
         self.setWindowFlags(flags)
+        # setWindowFlags 会销毁重建 Qt 窗口句柄：之前的 mpv 宿主 STATIC
+        #（原窗口的子窗）随之死亡，缓存句柄/旧 MpvPlayer 的 wid 都已失效，
+        # 必须作废重建，否则 mpv 持续渲染进死句柄 → 访问违例崩溃循环
+        if self._mpv_host and not user32.IsWindow(self._mpv_host):
+            self._mpv_host = None
+            if self._mpv is not None:
+                try:
+                    self._mpv.terminate()
+                except Exception:
+                    pass
+                self._mpv = None
         self._loop = loop
         self.show()
         # 几何在 Qt 层定好：铺满虚拟屏幕（多显示器）或仅主屏居中。
@@ -713,15 +724,11 @@ class MainWindow(QMainWindow):
                 self.config.set("current_wallpaper", str(Path(path).resolve()))
                 self.config.set("current_wallpaper_type", "video")
                 self.statusBar().showMessage(f"已设置动态壁纸：{Path(path).name}")
-                # 「适应/居中」等留边模式的透明区域会透出桌面 SPI 壁纸，
-                # 把桌面底图换成纯黑，黑边才真的是黑的（SPI 较慢，走线程）
-                def _black_bg():
-                    try:
-                        from ..wallpaper import ensure_black_wallpaper, set_wallpaper
-                        set_wallpaper(ensure_black_wallpaper(), "fill")
-                    except Exception:
-                        pass
-                threading.Thread(target=_black_bg, daemon=True).start()
+                # 注意：这里绝不能调 SPI 换桌面底图。实测本机每次
+                # SPI_SETDESKWALLPAPER 都会让 Explorer 重建壁纸层
+                # （WorkerW 句柄更换，我们的子窗被连带销毁）→ 保活发现
+                # 窗口死亡 → 重建重挂 → 再次 SPI → 死亡螺旋（秒级闪屏）。
+                # 「适应/居中」留边区域透出原桌面壁纸，属于可接受行为。
                 if self.config.get("video_paused_on_fullscreen", True):
                     self._fs_timer.start()
                 self._keep_timer.start()   # 层级保活，防 Explorer 重绘盖掉
@@ -760,6 +767,12 @@ class MainWindow(QMainWindow):
             self._keep_timer.stop()
             return
         from .. import flicklog
+        # 壁纸窗口随 WorkerW 被销毁（句柄失效）：重挂没有意义，
+        # 必须整体重建播放窗口 + mpv，否则 mpv 会持续渲染进死句柄崩溃
+        if not user32.IsWindow(int(vw.winId())):
+            flicklog.log("ka rebuild: video window destroyed with WorkerW")
+            self._rebuild_video_window()
+            return
         self._ka_ticks = getattr(self, "_ka_ticks", 0) + 1
         if self._ka_ticks % 20 == 1:
             flicklog.log("ka alive")
@@ -787,6 +800,23 @@ class MainWindow(QMainWindow):
                 vw, stretch=bool(self.config.get("video_stretch", True)))
         except Exception:
             pass
+
+    def _rebuild_video_window(self):
+        """壁纸窗口已被销毁（随 WorkerW）：换新窗口 + 重播当前壁纸。"""
+        path = str(self.config.get("current_wallpaper", ""))
+        old = self.video_window
+        self.video_window = None
+        if old is not None:
+            try:
+                old.stop()
+            except Exception:
+                pass
+            try:
+                old.deleteLater()
+            except Exception:
+                pass
+        if path and Path(path).exists():
+            self.set_video_wallpaper(path, force=True)
 
     # ---------- 区域截图设置壁纸 ----------
     @staticmethod

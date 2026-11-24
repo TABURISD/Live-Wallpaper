@@ -270,6 +270,7 @@ class MpvPlayer:
         self._closing = False
         self._last_path: str | None = None
         self._gen = 0          # 代际：防止旧看门狗误重拉
+        self._crash_hist: list[float] = []   # 近期崩溃时间戳（退避用）
         self._watch_thread: threading.Thread | None = None
         self._spawn()
 
@@ -317,7 +318,11 @@ class MpvPlayer:
         self._watch_thread.start()
 
     def _watch(self, gen: int) -> None:
-        """看门狗：mpv 进程意外退出（如 LuaJIT SEH）时自动重拉。"""
+        """看门狗：mpv 进程意外退出（如 LuaJIT SEH）时自动重拉。
+
+        崩溃退避：10 秒内崩 3 次以上说明环境异常（常见：宿主窗口已
+        死亡），停 30 秒再重试，避免崩溃风暴空转打满 CPU。
+        """
         proc = self._proc
         if proc is None:
             return
@@ -325,6 +330,15 @@ class MpvPlayer:
         flicklog.log(f"mpv exited code={code} closing={self._closing}")
         if self._closing or gen != self._gen or self._last_path is None:
             return
+        now = time.monotonic()
+        hist = [t for t in self._crash_hist if now - t < 10.0]
+        hist.append(now)
+        self._crash_hist = hist
+        if len(hist) >= 3:
+            flicklog.log("mpv crash loop, backoff 30s")
+            time.sleep(30.0)
+            if self._closing or gen != self._gen:
+                return
         time.sleep(0.8)
         if self._closing or gen != self._gen:
             return

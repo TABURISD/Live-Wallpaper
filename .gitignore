@@ -41,3 +41,8 @@ flicker.log
 scripts/_*
 dist/
 build/
+*.out
+out_*.bmp
+scripts/_*.py
+flicker.log
+app_dev.out
