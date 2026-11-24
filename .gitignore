@@ -37,3 +37,7 @@ scripts/_patch_*.py
 # 系统
 Thumbs.db
 Desktop.ini
+flicker.log
+scripts/_*
+dist/
+build/
