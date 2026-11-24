@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes as wintypes
 import random
+import struct
 import sys
 from pathlib import Path
 
@@ -53,6 +54,27 @@ def set_wallpaper(image_path: str, style: str = "fill") -> bool:
     except Exception:
         return False
     return False
+
+
+def ensure_black_wallpaper() -> str:
+    """生成（或复用）一张纯黑 BMP 并返回路径。
+
+    动态壁纸用 mpv 的 d3d11 直出模式渲染，「适应」等留边模式下交换链
+    未覆盖区域是透明的，会透出桌面 SPI 壁纸——挂视频时把桌面底图换成
+    纯黑，黑边才真的是黑的。
+    """
+    from .config import CACHE_DIR
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = CACHE_DIR / "black.bmp"
+    if path.exists():
+        return str(path)
+    w = h = 64
+    row = (w * 3 + 3) & ~3
+    img = b"\x00" * (row * h)
+    hdr = struct.pack("<2sIHHI", b"BM", 54 + len(img), 0, 0, 54)
+    info = struct.pack("<IiiHHIIiiII", 40, w, h, 1, 24, 0, len(img), 0, 0, 0, 0)
+    path.write_bytes(hdr + info + img)
+    return str(path)
 
 
 class Slideshow:

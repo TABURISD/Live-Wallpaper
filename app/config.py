@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
-VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv"}
+VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".ogv"}
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 

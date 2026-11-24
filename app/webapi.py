@@ -131,7 +131,7 @@ def create_app(win) -> Flask:
         if not p or not Path(p).exists():
             return jsonify({"ok": False, "error": "文件不存在"}), 400
         ext = Path(p).suffix.lower()
-        if ext in {".mp4", ".mkv", ".webm", ".mov", ".avi", ".gif", ".m4v"}:
+        if ext in {".mp4", ".mkv", ".webm", ".mov", ".avi", ".gif", ".m4v", ".ogv"}:
             win.bridge_invoke(lambda: win.set_video_wallpaper(p))
         else:
             win.bridge_invoke(lambda: win.set_image_wallpaper(p))
@@ -253,17 +253,20 @@ def create_app(win) -> Flask:
         page = max(1, int(request.args.get("page", 1)))
         sorting = request.args.get("sorting", "favorites")
         try:
+            from .sources import bing, picsum, wallhaven, wikimedia
             if src == "Wallhaven":
-                items = sources.wallhaven.search(
+                items = wallhaven.search(
                     query=query,
                     categories=config.get("wallhaven_categories", "110"),
                     purity=config.get("wallhaven_purity", "100"),
                     sorting=sorting, ratios="16x9", page=page,
                     api_key=config.get("wallhaven_api_key", ""))
             elif src == "必应每日":
-                items = sources.bing.daily(count=8)
+                items = bing.daily(count=8)
+            elif src == "维基视频(动态)":
+                items = wikimedia.search(query=query, page=page)
             else:
-                items = sources.picsum.random_list(page=page, limit=24)
+                items = picsum.random_list(page=page, limit=24)
         except Exception as ex:
             return jsonify({"ok": False, "error": str(ex)}), 502
         with _online_lock:
@@ -274,6 +277,7 @@ def create_app(win) -> Flask:
             "id": str(it["id"]), "title": it.get("title") or str(it["id"]),
             "res": it.get("resolution", ""),
             "fav": it.get("favorites"),
+            "video": bool(it.get("video")),
             "thumb": f"/api/online/thumb?key={it['id']}",
         } for it in items])
 
@@ -305,31 +309,54 @@ def create_app(win) -> Flask:
             return jsonify({"ok": False, "error": "记录不存在"}), 404
         try:
             import hashlib
+            import time
             import requests
+            UA_DL = {"User-Agent": "MeWallpaper/1.0 (https://github.com/TABURISD/Live-Wallpaper; personal use)"}
             dest_dir = Path(config.get("download_dir") or DOWNLOAD_DIR)
             dest_dir.mkdir(parents=True, exist_ok=True)
             h = hashlib.md5(it["path"].encode()).hexdigest()[:10]
+            VIDEO_EXT = (".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".ogv")
+            IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
             ext = ".jpg"
-            for e2 in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
-                if e2 in it["path"].lower().split("?")[0][-8:]:
+            tail = it["path"].lower().split("?")[0][-8:]
+            for e2 in VIDEO_EXT + IMG_EXT:
+                if e2 in tail:
                     ext = e2
                     break
+            is_video = ext in VIDEO_EXT
             # 文件名：标题（安全化） + 短哈希，避免不同源重名覆盖
             safe = "".join(c for c in (it.get("title") or str(it["id"]))
                            if c not in '\\/:*?"<>|')[:60].strip() or str(it["id"])
             dest = dest_dir / f"{safe}-{h}{ext}"
             if not dest.exists():
-                r = requests.get(it["path"], timeout=60,
-                                 headers={"User-Agent": "MeWallpaper/0.1"},
-                                 proxies=sources.get_proxies())
-                r.raise_for_status()
-                dest.write_bytes(r.content)
-            src = {"Wallhaven": "wallhaven", "必应每日": "bing"}.get(
+                # Wikimedia 对共享代理出口 IP 常返回 429：有限重试 + 退避
+                last_ex = None
+                for attempt in range(4):
+                    try:
+                        r = requests.get(it["path"], timeout=120,
+                                         headers=UA_DL,
+                                         proxies=sources.get_proxies())
+                        r.raise_for_status()
+                        dest.write_bytes(r.content)
+                        last_ex = None
+                        break
+                    except Exception as ex:
+                        last_ex = ex
+                        time.sleep(2 + attempt * 2)
+                if last_ex is not None:
+                    raise last_ex
+            src = {"Wallhaven": "wallhaven", "必应每日": "bing",
+                   "维基视频(动态)": "wikimedia"}.get(
                 d.get("source", ""), "picsum")
-            library.add(str(dest), source=src, title=it.get("title", ""),
+            library.add(str(dest), entry_type="video" if is_video else "image",
+                        source=src, title=it.get("title", ""),
                         tags=it.get("tags", []))
             if d.get("set"):
-                win.bridge_invoke(lambda: win.set_image_wallpaper(str(dest)))
+                if is_video:
+                    win.bridge_invoke(
+                        lambda: win.set_video_wallpaper(str(dest)))
+                else:
+                    win.bridge_invoke(lambda: win.set_image_wallpaper(str(dest)))
             return jsonify({"ok": True, "path": str(dest)})
         except Exception as ex:
             return jsonify({"ok": False, "error": str(ex)}), 502

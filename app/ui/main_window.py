@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
+import threading
 
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QPoint
 from PySide6.QtGui import QAction, QCloseEvent, QColor, QIcon, QPainter, QPixmap, QPixmapCache
@@ -712,6 +713,15 @@ class MainWindow(QMainWindow):
                 self.config.set("current_wallpaper", str(Path(path).resolve()))
                 self.config.set("current_wallpaper_type", "video")
                 self.statusBar().showMessage(f"已设置动态壁纸：{Path(path).name}")
+                # 「适应/居中」等留边模式的透明区域会透出桌面 SPI 壁纸，
+                # 把桌面底图换成纯黑，黑边才真的是黑的（SPI 较慢，走线程）
+                def _black_bg():
+                    try:
+                        from ..wallpaper import ensure_black_wallpaper, set_wallpaper
+                        set_wallpaper(ensure_black_wallpaper(), "fill")
+                    except Exception:
+                        pass
+                threading.Thread(target=_black_bg, daemon=True).start()
                 if self.config.get("video_paused_on_fullscreen", True):
                     self._fs_timer.start()
                 self._keep_timer.start()   # 层级保活，防 Explorer 重绘盖掉
