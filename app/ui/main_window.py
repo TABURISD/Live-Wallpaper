@@ -252,7 +252,7 @@ class VideoPlayerWindow(QMainWindow):
 
     # ---------- 播放控制 ----------
     def play(self, path: str, volume: int, stretch: bool, hwdec: bool = True,
-             loop: bool = True) -> bool:
+             loop: bool = True, style: str = "fill") -> bool:
         from PySide6.QtGui import QGuiApplication
         # 壁纸模式：贴底 + 无边框（窗口属性在 Qt 层改，随后 Win32 再嵌入 WorkerW）
         flags = self.windowFlags() | Qt.WindowType.FramelessWindowHint \
@@ -276,6 +276,7 @@ class VideoPlayerWindow(QMainWindow):
         if self.backend == "mpv" and self._mpv is not None:
             self._mpv.set_loop(loop)
             self._mpv.set_volume(volume)
+            self._mpv.set_fill_mode(style)   # 填充方式对动态壁纸同样生效
             self._mpv.resume()
             self._mpv.play(path)
         else:
@@ -689,6 +690,7 @@ class MainWindow(QMainWindow):
                 stretch=bool(self.config.get("video_stretch", True)),
                 hwdec=bool(self.config.get("video_hw_decode", True)),
                 loop=bool(self.config.get("video_loop", True)),
+                style=str(self.config.get("wallpaper_style", "fill")),
             )
             if not ok:
                 # 失败常见原因是 WorkerW 尚未就绪；异步重试两轮，
@@ -882,6 +884,19 @@ class MainWindow(QMainWindow):
         hwnd = user32.GetForegroundWindow()
         if not hwnd:
             return
+        # 桌面/任务栏等系统外壳窗口的矩形就是整个屏幕，但前台是它们
+        # 并不代表用户在跑全屏应用——不排除会把「桌面空闲」误判成全屏，
+        # 壁纸被无限期暂停（表现为「只播了一次就停」）。
+        cls_buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls_buf, 256)
+        if cls_buf.value in ("Progman", "WorkerW", "Shell_TrayWnd",
+                             "Shell_SecondaryTrayWnd", "SysListView32"):
+            return
+        # 自己的 WebView2 界面窗口最大化时同样是全屏矩形，不算
+        title_buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title_buf, 256)
+        if title_buf.value == "MeWallpaper":
+            return
         rc = wintypes.RECT()
         user32.GetWindowRect(hwnd, ctypes.byref(rc))
         sw = user32.GetSystemMetrics(0)
@@ -924,7 +939,8 @@ class MainWindow(QMainWindow):
             # 填充方式变了：立即用新样式重设当前壁纸，
             # 否则要等下一次换壁纸才生效，看起来像「设置不生效」
             self.set_image_wallpaper(cur)
-        if (keys & {"video_stretch", "video_hw_decode", "video_loop"}
+        if ((keys & {"video_stretch", "video_hw_decode", "video_loop",
+                     "wallpaper_style"})   # 填充方式对动态壁纸同样即时生效
                 and ctype == "video" and self.video_window
                 and self.video_window.attached):
             # force=True：同路径幂等守卫会挡住普通重设，这里必须强制重建

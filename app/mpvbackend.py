@@ -377,6 +377,23 @@ class MpvPlayer:
         self.loop = loop
         self._ipc and self._ipc.set("loop-file", "inf" if loop else "no")
 
+    def set_fill_mode(self, style: str) -> None:
+        """按静态壁纸同款「填充方式」语义调整视频画面：
+        fill/stretch/span = 裁边铺满；fit/tile = 适应留边；
+        center = 原始尺寸居中。"""
+        ipc = self._ipc
+        if ipc is None:
+            return
+        if style in ("fill", "stretch", "span"):
+            ipc.set("panscan", 1.0)
+            ipc.set("video-unscaled", False)
+        elif style == "center":
+            ipc.set("panscan", 0.0)
+            ipc.set("video-unscaled", True)
+        else:                       # fit / tile 等一律按「适应」
+            ipc.set("panscan", 0.0)
+            ipc.set("video-unscaled", False)
+
     def pause(self) -> None:
         self._ipc and self._ipc.set("pause", True)
 

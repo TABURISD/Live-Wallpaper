@@ -205,6 +205,14 @@ def main() -> int:
     threading.Thread(target=_set_window_icon, daemon=True).start()
 
     webview.start()          # 阻塞主线程；所有窗口关闭且非退出时由 on_closed 重建
+    # start() 返回 = WebView2 层窗口全部关闭。这不是退出信号：动态壁纸、
+    # 托盘和 Qt 核心都还活着（此前 WebView2 崩溃或窗口重建失败时进程
+    # 直接整体退出，表现为「闪退」）。非正常返回时保持进程常驻。
+    if not quitting["on"]:
+        from . import flicklog
+        flicklog.log("webview.start returned without quit; keep process alive")
+        while True:
+            time.sleep(3600)
     return 0
 
 

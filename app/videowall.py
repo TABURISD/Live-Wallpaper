@@ -104,19 +104,28 @@ def find_workerw() -> int:
         progman, MSG_SPAWN_WORKERW, 0, 0, 0x0002, 1000, ctypes.byref(res))
 
     candidates: list[int] = []
+    progman_children: set[int] = set()
     # 1) Progman 子窗口里的 WorkerW（Win11 正主在这里）
     for child in _children_of(progman):
         buf = ctypes.create_unicode_buffer(256)
         user32.GetClassNameW(child, buf, 256)
         if buf.value == WORKERW:
             candidates.append(child)
-    # 2) 顶层 WorkerW（旧系统路径）
-    candidates.extend(_enum_windows_by_class(WORKERW))
+            progman_children.add(child)
+    # 2) 顶层 WorkerW（旧系统路径；也可能是其他软件造的同名层）
+    for h in _enum_windows_by_class(WORKERW):
+        if h not in progman_children:
+            candidates.append(h)
 
     if not candidates:
         return 0
-    # 可见优先，其次面积最大（覆盖虚拟屏幕的那个）
-    candidates.sort(key=lambda h: (user32.IsWindowVisible(h), _rect_area(h)))
+    # 确定性选择：可见 > 面积最大 > Progman 子窗口（真壁纸层）> 句柄序。
+    # 不使用纯枚举序做决胜——枚举顺序跨调用不稳定，同分时会每次换目标，
+    # 把壁纸窗口在不同 WorkerW 层之间搬来搬去（闪屏 + 句柄失效）。
+    candidates.sort(key=lambda h: (user32.IsWindowVisible(h),
+                                   _rect_area(h),
+                                   h in progman_children,
+                                   h))
     return candidates[-1]
 
 
